@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode 工程文件由 xcodegen 从 project.yml 生成；不提交（含签名配置）
+*.xcodeproj/
+
+# Xcode build / derived data
+build/
+DerivedData/
+*.xcuserstate
+
+# Xcode user-specific (含本机用户名、路径、窗口状态)
+xcuserdata/
+**/xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+.build/
