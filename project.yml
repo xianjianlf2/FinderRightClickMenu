@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     macOS: "13.0"
   createIntermediateGroups: true
+packages:
+  PermissionFlow:
+    path: ThirdParty/PermissionFlow
 settings:
   base:
     CODE_SIGN_STYLE: Manual
@@ -30,6 +33,8 @@ targets:
     dependencies:
       - target: MenuExtension
         embed: true
+      - package: PermissionFlow
+        product: PermissionFlow
   MenuExtension:
     type: app-extension
     platform: macOS

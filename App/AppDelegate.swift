@@ -3,10 +3,12 @@ import UserNotifications
 import ServiceManagement
 import ApplicationServices
 import Carbon
+import PermissionFlow
 
 /// 非沙箱配套 App：菜单栏常驻，接收扩展发来的 frcm:// URL 执行需要权限的动作，
 /// 并提供设置页（授权 / 切换终端）。
 @main
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 终端表
@@ -41,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let defaults = UserDefaults.standard
     private let kPreferred = "preferredTerminalBundleID"
     private let kOnboarded = "didOnboard"
+
+    /// 「拖图标到系统设置授权」的引导控制器：打开对应隐私面板并弹出跟随窗口的浮动拖放面板。
+    private lazy var permissionFlow = PermissionFlow.makeController(
+        configuration: PermissionFlowConfiguration(requiredAppURLs: [Bundle.main.bundleURL]))
 
     // MARK: - 权限
     /// 设置窗口里展示的三类隐私权限（与「拖图标授权」槽位一一对应）。
@@ -276,9 +282,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 标题列
         let eyebrow = eyebrowLabel("第 1 步")
-        let title = headingLabel("拖动图标，一键授权", size: 20)
-        let desc = bodyLabel("把右侧图标拖入下方任意权限槽，系统会自动把本应用加入对应的隐私白名单。",
-                             maxWidth: 300)
+        let title = headingLabel("点击权限，按引导授权", size: 20)
+        let desc = bodyLabel("点击下方任意权限即可前往「系统设置」。辅助功能与完全磁盘访问会弹出浮动面板，引导你把本应用拖入对应列表完成授权。",
+                             maxWidth: AppDelegate.panelWidth - 56)
 
         let textCol = NSStackView(views: [eyebrow, title, desc])
         textCol.orientation = .vertical
@@ -287,26 +293,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         textCol.setCustomSpacing(7, after: eyebrow)
         textCol.translatesAutoresizingMaskIntoConstraints = false
 
-        // 可拖拽 App 图标（带轻微悬浮动画）
-        let iconView = DraggableAppIconView()
-        iconView.wantsLayer = true
-        iconView.imageScaling = .scaleProportionallyUpOrDown
-        iconView.image = NSWorkspace.shared.icon(forFile: Bundle.main.bundleURL.path)
-        iconView.fileURL = Bundle.main.bundleURL
-        iconView.toolTip = "拖到「系统设置」对应的隐私列表中以授权"
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        iconView.heightAnchor.constraint(equalToConstant: 72).isActive = true
-
-        let topRow = NSStackView(views: [textCol, iconView])
-        topRow.orientation = .horizontal
-        topRow.alignment = .top
-        topRow.distribution = .fill
-        topRow.spacing = 20
-        topRow.translatesAutoresizingMaskIntoConstraints = false
-        textCol.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        iconView.setContentHuggingPriority(.required, for: .horizontal)
-
         // 三个权限槽
         let slots = NSStackView(views: Perm.allCases.map { buildSlot(for: $0) })
         slots.orientation = .horizontal
@@ -314,11 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         slots.spacing = 12
         slots.translatesAutoresizingMaskIntoConstraints = false
 
-        let dashed = DashedLineView(color: rgba(94, 160, 255, 0.45))
-        dashed.translatesAutoresizingMaskIntoConstraints = false
-        dashed.heightAnchor.constraint(equalToConstant: 1).isActive = true
-
-        let col = NSStackView(views: [topRow, dashed, slots])
+        let col = NSStackView(views: [textCol, slots])
         col.orientation = .vertical
         col.alignment = .leading
         col.spacing = 16
@@ -326,8 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hero.addSubview(col)
         NSLayoutConstraint.activate([
-            topRow.widthAnchor.constraint(equalTo: col.widthAnchor),
-            dashed.widthAnchor.constraint(equalTo: col.widthAnchor),
+            textCol.widthAnchor.constraint(equalTo: col.widthAnchor),
             slots.widthAnchor.constraint(equalTo: col.widthAnchor),
             col.topAnchor.constraint(equalTo: hero.topAnchor, constant: 14),
             col.leadingAnchor.constraint(equalTo: hero.leadingAnchor, constant: 28),
@@ -342,7 +323,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tint = rgba(r, g, b)
         let slot = SlotView(fill: rgba(r, g, b, 0.08), dash: rgba(r, g, b, 0.35))
         slot.translatesAutoresizingMaskIntoConstraints = false
-        slot.onClick = { [weak self] in self?.openSettings(for: perm) }
+        slot.onClick = { [weak self, weak slot] in self?.openSettings(for: perm, source: slot) }
 
         let chip = iconChip(symbol: perm.symbol, tint: tint, bg: rgba(r, g, b, 0.20), size: 24, radius: 7, pointSize: 12)
         let name = NSTextField(labelWithString: perm.title)
@@ -547,24 +528,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return FileManager.default.isReadableFile(atPath: path)
     }
 
-    private func openSettings(for perm: Perm) {
+    /// 「辅助功能」「完全磁盘访问」是列表型面板，走拖图标引导；「自动化」无拖放列表，仍直接打开系统设置。
+    private func openSettings(for perm: Perm, source: NSView? = nil) {
         switch perm {
         case .automation: openAutomationSettings(nil)
-        case .accessibility: openAccessibilitySettings(nil)
-        case .fulldisk: openFullDiskSettings(nil)
+        case .accessibility: startPermissionFlow(.accessibility, source: source)
+        case .fulldisk: startPermissionFlow(.fullDiskAccess, source: source)
         }
+    }
+
+    /// 打开对应隐私面板并启动浮动拖放引导。`source` 用作「飞向系统设置」动画的起点。
+    private func startPermissionFlow(_ pane: PermissionFlowPane, source: NSView?) {
+        permissionFlow.authorize(
+            pane: pane,
+            suggestedAppURLs: [Bundle.main.bundleURL],
+            sourceFrameInScreen: source.flatMap(sourceFrameInScreen))
+    }
+
+    private func sourceFrameInScreen(for view: NSView) -> CGRect? {
+        guard let window = view.window else { return nil }
+        let frameInWindow = view.convert(view.bounds, to: nil)
+        return window.convertToScreen(frameInWindow)
     }
 
     @objc private func openAutomationSettings(_ sender: Any?) {
         openSettingsURL("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
-    }
-
-    @objc private func openAccessibilitySettings(_ sender: Any?) {
-        openSettingsURL("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-    }
-
-    @objc private func openFullDiskSettings(_ sender: Any?) {
-        openSettingsURL("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
     }
 
     private func openSettingsURL(_ string: String) {
@@ -906,26 +894,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// 显示 App 图标、可被拖拽到「系统设置」隐私列表中以添加授权。
-final class DraggableAppIconView: NSImageView, NSDraggingSource {
-    var fileURL: URL?
-
-    override func mouseDown(with event: NSEvent) {
-        guard let url = fileURL else {
-            super.mouseDown(with: event)
-            return
-        }
-        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
-        item.setDraggingFrame(bounds, contents: image)
-        beginDraggingSession(with: [item], event: event, source: self)
-    }
-
-    func draggingSession(_ session: NSDraggingSession,
-                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        .copy
-    }
-}
-
 /// 自上而下的线性渐变背景视图（用作设置窗口面板底色）。
 final class GradientBackgroundView: NSView {
     private let topColor: NSColor
@@ -990,27 +958,5 @@ final class RowView: NSView {
 
     override func resetCursorRects() {
         if onClick != nil { addCursorRect(bounds, cursor: .pointingHand) }
-    }
-}
-
-/// 一条水平虚线（设计稿里连接图标与权限槽的装饰线）。
-final class DashedLineView: NSView {
-    private let color: NSColor
-    init(color: NSColor) {
-        self.color = color
-        super.init(frame: .zero)
-        wantsLayer = true
-    }
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let y = bounds.midY
-        let path = NSBezierPath()
-        path.move(to: CGPoint(x: 0, y: y))
-        path.line(to: CGPoint(x: bounds.maxX, y: y))
-        color.setStroke()
-        path.lineWidth = 1.2
-        path.setLineDash([4, 4], count: 2, phase: 0)
-        path.stroke()
     }
 }
