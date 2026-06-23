@@ -1,5 +1,7 @@
 # FinderRightClickMenu
 
+简体中文 · [English](README.en.md)
+
 macOS 访达（Finder）右键菜单小工具：在右键菜单里加入「复制路径 / 上一层 / 在此打开终端」。
 
 - **MenuExtension**：沙箱内的 Finder Sync 扩展，负责构建菜单、拿到选中路径；需要权限的动作通过 `frcm://` URL 交给配套 App。
