@@ -24,3 +24,28 @@ xcodebuild -project FinderRightClickMenu.xcodeproj \
 
 把构建出的 `FinderRightClickMenu.app` 拷到 `/Applications` 并打开，然后在
 「系统设置 → 隐私与安全性 → 扩展 / 访达扩展」中启用本扩展。
+
+## 打包 DMG / 发布
+
+```sh
+scripts/release-dmg.sh 1.0.0              # 构建 Release 并打成 dist/FinderRightClickMenu-1.0.0.dmg
+PUBLISH=1 scripts/release-dmg.sh 1.0.0    # 额外用 gh 发布 GitHub Release 并上传 DMG
+```
+
+本仓库默认 ad-hoc 签名，未做 Developer ID 签名与公证；从 GitHub 下载的 DMG 在别的 Mac 上会被 Gatekeeper 拦截（见下）。要正经公开分发，需配置 Developer ID 证书并对产物做 `notarytool` 公证 + `stapler` 装订。
+
+## macOS 校验拦截（「已损坏 / 无法验证」）
+
+如果 macOS 弹出类似 `Apple 无法验证 "FinderRightClickMenu" 是否包含恶意软件` 或「已损坏，无法打开」的提示，对你信任的应用包移除 quarantine 标记后再重新打开：
+
+```sh
+xattr -dr com.apple.quarantine /Applications/FinderRightClickMenu.app
+```
+
+如果运行的是本地构建版本而非 `/Applications` 里的副本，把路径换成实际位置，例如：
+
+```sh
+xattr -dr com.apple.quarantine ./build/Build/Products/Debug/FinderRightClickMenu.app
+```
+
+只对你信任的构建执行此命令（本仓库下载的版本或你本地自行构建的版本）。移除后正常打开 App，再到「系统设置 → 隐私与安全性 → 扩展 / 访达扩展」启用扩展即可。
