@@ -16,3 +16,6 @@ xcuserdata/
 # Swift Package Manager
 .swiftpm/
 .build/
+
+# 发布产物（DMG 等）
+dist/
